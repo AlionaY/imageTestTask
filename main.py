@@ -1,24 +1,18 @@
-import logging
-
-import gspread
-from aiohttp import ClientError
-from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
+import logging
+from io import BytesIO
+
 import aiohttp
 from PIL import Image
-from io import BytesIO
-from googleapiclient.discovery import build
+from aiohttp import ClientError
 
-SPREADSHEET_ID = "1vHP__2QbwKttfJfI8KkmLvYhgaJ5minKOKscXacz73k"
-SPREADSHEET_NAME = "Image Parser Test Task"
+import config
+from auth import authenticate_google_sheets
 
 dimensions = []
 
 
-async def fetch_urls_from_sheet(sheet_name, batch_size, credentials):
-    gc = gspread.authorize(credentials)
-
-    sheet = gc.open(sheet_name).sheet1
+async def fetch_urls_from_sheet(sheet, batch_size):
     urls = sheet.col_values(1)[1:]
 
     batches = [urls[i:i + batch_size] for i in range(0, len(urls), batch_size)]
@@ -57,22 +51,23 @@ async def get_image_dimensions(session, url):
 
 def write_data_to_google_sheet(service, dimension_list):
     print('write_data_to_google_sheet')
-    value_list = [convertTuple(i) for i in dimension_list]
+    value_list = [convertTupleToString(i) for i in dimension_list]
     value_input_option = 'USER_ENTERED'
     body = {
         'majorDimension': 'COLUMNS',
         'values': [value_list]
     }
     cell_range = 'B2'
+
     service.spreadsheets().values().update(
-        spreadsheetId=SPREADSHEET_ID,
+        spreadsheetId=config.SPREADSHEET_ID,
         valueInputOption=value_input_option,
         range=cell_range,
         body=body
     ).execute()
 
 
-def convertTuple(dimension_tuple):
+def convertTupleToString(dimension_tuple):
     try:
         return f'{dimension_tuple[0]}x{dimension_tuple[1]}'
     except TypeError:
@@ -80,14 +75,12 @@ def convertTuple(dimension_tuple):
 
 
 async def main():
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
-    credentials = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-    spreadsheet_service = build('sheets', 'v4', credentials=credentials)
-    batch_size = 100
+    spreadsheet_service = authenticate_google_sheets()
 
-    batches = await fetch_urls_from_sheet(SPREADSHEET_NAME, batch_size, credentials)
+    batch_size = 100
+    batches = await fetch_urls_from_sheet(config.SPREADSHEET_NAME, batch_size)
     await process_batches(batches, dimensions)
+
     write_data_to_google_sheet(spreadsheet_service, dimensions)
 
 
